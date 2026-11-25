@@ -1,0 +1,9 @@
+node_modules/
+.scratch/
+*.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.DS_Store
+Thumbs.db

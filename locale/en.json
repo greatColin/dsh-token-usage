@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Token usage",
+    "description": "Hourly token usage per session, filterable by session and workspace.",
+    "detail": "docs/DETAIL.md"
+  }
+}
