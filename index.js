@@ -451,6 +451,69 @@ export function apply (ctx) {
   }
 
   /**
+   * Per-model totals and a per-model series over the same filters as the overview.
+   * @param {URL} url request URL.
+   * @param {import('node:http').ServerResponse} res response.
+   */
+  function models (url, res) {
+    const now = Date.now()
+    if (url.searchParams.get('refresh') === '1' || now - lastSyncAt > SYNC_THROTTLE_MS) sync(false)
+    const rawTo = Number(url.searchParams.get('to'))
+    const to = Number.isFinite(rawTo) && rawTo > 0 ? rawTo : now
+    const rawFrom = Number(url.searchParams.get('from'))
+    const from = Number.isFinite(rawFrom) && rawFrom >= 0 ? rawFrom : to - 7 * 24 * 3_600_000
+    const requested = (url.searchParams.get('sessions') ?? '').split(',').map(value => value.trim()).filter(Boolean)
+    const includeSubagents = url.searchParams.get('includeSubagents') !== '0'
+    const scope = requested.length === 0 ? [] : (includeSubagents ? withDescendants(requested) : requested)
+    const granularityParam = url.searchParams.get('granularity')
+    const span = to - from
+    const bucket = granularityParam === 'day' || (granularityParam !== 'hour' && span > 3 * 24 * 3_600_000)
+      ? { unit: 'day', size: 24 }
+      : { unit: 'hour', size: 1 }
+    const rawOffset = Number(url.searchParams.get('tzOffset'))
+    const tzShift = Number.isFinite(rawOffset) ? -rawOffset * 60_000 : 0
+
+    const where = ['charged = 1', 'time >= ?', 'time <= ?']
+    const params = [from, to]
+    if (scope.length > 0) {
+      where.push(`session_id IN (${scope.map(() => '?').join(',')})`)
+      params.push(...scope)
+    }
+    const clause = where.join(' AND ')
+
+    // A NULL model (calls that carried none) is reported as '' so it still groups.
+    const totals = db.prepare(`SELECT COALESCE(model, '') AS model,
+      COALESCE(SUM(tok_in),0) AS tok_in, COALESCE(SUM(tok_out),0) AS tok_out,
+      COALESCE(SUM(tok_cache_read),0) AS tok_cache_read, COALESCE(SUM(tok_cache_write),0) AS tok_cache_write,
+      COUNT(*) AS calls FROM usage WHERE ${clause} GROUP BY model ORDER BY (SUM(tok_in)+SUM(tok_out)+SUM(tok_cache_read)+SUM(tok_cache_write)) DESC`).all(...params)
+    const series = db.prepare(`SELECT COALESCE(model, '') AS model, CAST((time + ?) / ? AS INTEGER) AS bucket,
+      SUM(tok_in) AS tok_in, SUM(tok_out) AS tok_out, SUM(tok_cache_read) AS tok_cache_read, SUM(tok_cache_write) AS tok_cache_write
+      FROM usage WHERE ${clause} GROUP BY model, bucket ORDER BY bucket`).all(tzShift, bucket.size * 3_600_000, ...params)
+
+    sendJson(res, 200, {
+      granularity: bucket.unit,
+      bucketSize: bucket.size,
+      from,
+      to,
+      scope,
+      models: totals.map(row => ({
+        model: row.model,
+        in: row.tok_in,
+        out: row.tok_out,
+        cacheRead: row.tok_cache_read,
+        cacheWrite: row.tok_cache_write,
+        total: row.tok_in + row.tok_out + row.tok_cache_read + row.tok_cache_write,
+        calls: row.calls,
+      })),
+      series: series.map(row => ({
+        model: row.model,
+        bucket: Number(row.bucket) * bucket.size * 3_600_000 - tzShift,
+        total: row.tok_in + row.tok_out + row.tok_cache_read + row.tok_cache_write,
+      })),
+    })
+  }
+
+  /**
    * List sessions with their in-range totals for the picker.
    * @param {URL} url request URL.
    * @param {import('node:http').ServerResponse} res response.
@@ -501,6 +564,7 @@ export function apply (ctx) {
         if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' })
         if (url.pathname === '/token-usage/api/overview') return overview(url, res)
         if (url.pathname === '/token-usage/api/sessions') return sessionList(url, res)
+        if (url.pathname === '/token-usage/api/models') return models(url, res)
         return sendJson(res, 404, { error: 'not found' })
       } catch (error) {
         ctx.logger?.warn?.(`token-usage: request failed: ${String(error)}`)

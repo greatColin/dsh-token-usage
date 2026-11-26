@@ -74,6 +74,15 @@ window.__ModuleLoader__.load({
       peerLabel: '当前会话',
       breakdownTitle: '用量构成',
       breakdownSub: '按 Token 占比',
+      rangeLabel: '时间',
+      grainLabel: '粒度',
+      modelShareTitle: '模型占比',
+      modelShareSub: '按 Token 占比',
+      modelUsageTitle: '模型用量',
+      modelUsageSub: '按模型合计',
+      modelTrendTitle: '模型用量趋势',
+      modelEmpty: '这个范围内没有模型调用。',
+      syncInfo: '扫描 {files} 个文件，更新 {changed} 个，耗时 {ms} ms',
     }
 
     const en = {
@@ -141,6 +150,15 @@ window.__ModuleLoader__.load({
       peerLabel: 'This session',
       breakdownTitle: 'Composition',
       breakdownSub: 'Share of tokens',
+      rangeLabel: 'Time',
+      grainLabel: 'Grain',
+      modelShareTitle: 'Model share',
+      modelShareSub: 'Share of tokens',
+      modelUsageTitle: 'Model usage',
+      modelUsageSub: 'Totals per model',
+      modelTrendTitle: 'Model trend',
+      modelEmpty: 'No model calls in this range.',
+      syncInfo: 'Scanned {files} files, {changed} updated, {ms} ms',
     }
 
     function pad(value) {
@@ -260,14 +278,6 @@ window.__ModuleLoader__.load({
       return value
     }
 
-    function MetricCell({ label, value, format, hint, last }) {
-      const animated = useCountUp(value)
-      return h('div', { style: styles.cell(last) },
-        h('span', { style: styles.cellLabel }, label),
-        h('span', { style: styles.cellValue }, format(animated)),
-        h('span', { style: styles.cellHint }, hint === undefined ? '\u00A0' : hint))
-    }
-
     /** Shared data pipeline: one instance per mounted surface. */
     function useUsageData(t, defaultSession, initialPreset) {
       const [preset, setPreset] = useState(initialPreset)
@@ -283,6 +293,7 @@ window.__ModuleLoader__.load({
       const [sessionsLoading, setSessionsLoading] = useState(true)
       const [sessionsError, setSessionsError] = useState(null)
       const [data, setData] = useState(null)
+      const [modelData, setModelData] = useState(null)
       const [loading, setLoading] = useState(false)
       const [error, setError] = useState(null)
       const [tick, setTick] = useState(0)
@@ -318,11 +329,13 @@ window.__ModuleLoader__.load({
         })
         if (selected.length > 0) params.set('sessions', selected.join(','))
         if (tick > 0) params.set('refresh', '1')
-        fetch(`/token-usage/api/overview?${params}`, { signal: controller.signal })
+        const fetchJson = path => fetch(`${path}?${params}`, { signal: controller.signal })
           .then(response => response.ok ? response.json() : response.text().then(text => Promise.reject(new Error(text.slice(0, 200)))))
-          .then(body => {
+        Promise.all([fetchJson('/token-usage/api/overview'), fetchJson('/token-usage/api/models')])
+          .then(([body, models]) => {
             if (!alive.current || gen !== generation.current) return
             setData(body)
+            setModelData(models)
             setUpdatedAt(Date.now())
           })
           .catch(failure => {
@@ -380,18 +393,44 @@ window.__ModuleLoader__.load({
         }
       }, [data, grain])
 
+      const modelView = useMemo(() => {
+        if (modelData === null) return { models: [], series: [], granularity: 'hour' }
+        const span = modelData.to - modelData.from
+        const unit = grain === 'auto' ? (span > 3 * DAY_MS ? 'day' : 'hour') : grain
+        // Fold per-model hourly buckets into days when the chart reads by day.
+        const folded = unit === 'day'
+          ? (() => {
+            const days = new Map()
+            for (const point of modelData.series) {
+              const date = new Date(bucketEpoch(point.bucket))
+              date.setHours(0, 0, 0, 0)
+              const key = `${point.model}\u0000${date.getTime()}`
+              const day = days.get(key) ?? { model: point.model, bucket: date.getTime(), total: 0 }
+              day.total += point.total
+              days.set(key, day)
+            }
+            return [...days.values()]
+          })()
+          : modelData.series
+        return { models: modelData.models, series: folded, granularity: unit }
+      }, [modelData, grain])
+
       return {
         preset, setPreset, customFrom, setCustomFrom, customTo, setCustomTo, customError, applyCustom,
         range, selected, setSelected, includeSubagents, setIncludeSubagents, grain, setGrain,
         pickerOpen, setPickerOpen, sessions, sessionsLoading, sessionsError,
         data, loading, error, updatedAt, rebuilding, refresh: () => setTick(value => value + 1), rebuild,
-        view, totals: view.totals,
+        view, totals: view.totals, modelView,
         selectedRows: selected.map(id => sessions.find(session => session.id === id) ?? { id, title: id, origin: null, cwd: '' }),
       }
     }
 
     const tokens = {
       bg: 'var(--dsw-alias-bg-layer-1)',
+      surface: 'var(--dsw-alias-bg-layer-2)',
+      // The background layers collapse to one colour in the light theme, so a
+      // control track takes its tint from the label ink instead.
+      track: 'color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent)',
       border: 'var(--dsw-alias-border-l1)',
       borderStrong: 'var(--dsw-alias-border-l2)',
       text: 'var(--dsw-alias-label-primary)',
@@ -399,8 +438,9 @@ window.__ModuleLoader__.load({
       error: 'var(--dsw-alias-state-error-primary)',
       accent: 'var(--dsw-static-blue-500, #3b82f6)',
       warn: 'var(--dsw-static-amber-600, #d97706)',
-      surface: 'var(--dsw-alias-bg-layer-2)',
       overlay: 'var(--dsw-alias-bg-overlay)',
+      radius: 'var(--dsw-radius-lg, 16px)',
+      radiusSmall: 'var(--dsw-radius-md, 12px)',
     }
 
     // Data colors are deliberately static palette tokens, not semantic aliases:
@@ -412,6 +452,23 @@ window.__ModuleLoader__.load({
       cacheWrite: 'var(--dsw-static-violet-500, var(--dsw-static-neutral-400, #9ca3af))',
     }
 
+    // Stable per-model colours: the Nth distinct model in the window gets the Nth
+    // swatch, so a model keeps its hue across the donut, bars, and trend.
+    const modelPalette = [
+      'var(--dsw-static-blue-500, #3b82f6)',
+      'var(--dsw-static-green-500, #22c55e)',
+      'var(--dsw-static-amber-500, #f59e0b)',
+      'var(--dsw-static-violet-500, #8b5cf6)',
+      'var(--dsw-static-red-500, #ef4444)',
+      'var(--dsw-static-cyan-500, #06b6d4)',
+      'var(--dsw-static-pink-500, #ec4899)',
+      'var(--dsw-static-neutral-500, #6b7280)',
+    ]
+
+    function modelLabel(name) {
+      return name === '' ? 'unknown' : name
+    }
+
     // Flat-card palette: card surfaces come from theme surfaces, data accents
     // from the static palette, and tints are the same hues at low alpha.
     const tints = {
@@ -421,6 +478,15 @@ window.__ModuleLoader__.load({
       violet: 'rgba(139, 92, 246, 0.14)',
       red: 'rgba(239, 68, 68, 0.13)',
     }
+
+    // Every module surface shares one fill, one border, and one radius, so the
+    // toolbar and the cards below it read as a single family.
+    const moduleShell = {
+      background: tokens.bg,
+      border: `1px solid ${tokens.borderStrong}`,
+      borderRadius: tokens.radius,
+    }
+    const moduleShadow = '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.05)'
 
     const styles = {
       // ---- dashboard shell ----
@@ -434,15 +500,6 @@ window.__ModuleLoader__.load({
       dashSub: { margin: '3px 0 0', fontSize: 12, color: tokens.muted },
       row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       grow: { flex: 1 },
-      seg: { display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
-      segItem(active) {
-        return {
-          type: 'button', border: 0, borderRadius: 999,
-          background: active ? tints.blue : 'transparent',
-          color: active ? tokens.accent : tokens.muted,
-          fontWeight: active ? 600 : 500, fontSize: 12, padding: '6px 12px', cursor: 'pointer', minHeight: 30,
-        }
-      },
       ghost: {
         border: 0, background: 'transparent', color: tokens.muted,
         borderRadius: 999, padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 30, fontWeight: 500,
@@ -461,30 +518,28 @@ window.__ModuleLoader__.load({
         padding: '0 2px', borderRadius: 4, fontSize: 14, lineHeight: 1,
       },
       linkish: { border: 0, background: 'transparent', color: tokens.muted, fontSize: 12, cursor: 'pointer', padding: '2px 4px', borderRadius: 4 },
-      // ---- metric strip ----
-      strip: {
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))',
-        border: `1px solid ${tokens.border}`, borderRadius: 12, background: tokens.bg, overflow: 'hidden',
-      },
-      cell(last) {
-        return {
-          padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 3,
-          borderRight: last ? 0 : `1px solid ${tokens.border}`, minWidth: 0,
-        }
-      },
-      cellLabel: { fontSize: 11, color: tokens.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-      cellValue: { fontSize: 21, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.01em' },
-      cellHint: { fontSize: 10, color: tokens.muted, fontVariantNumeric: 'tabular-nums' },
       // ---- chart ----
       chartCard: {
-        border: `1px solid ${tokens.border}`, borderRadius: 12, background: tokens.bg,
+        ...moduleShell, boxShadow: moduleShadow,
         padding: '14px 16px 6px', display: 'flex', flexDirection: 'column', gap: 10,
       },
       chartHead: { display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
       chartTitle: { fontSize: 12, fontWeight: 600, color: tokens.text },
+      chartBody: { display: 'flex', flexDirection: 'column', gap: 10 },
       legend: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontSize: 11, color: tokens.muted },
       legendItem: { display: 'inline-flex', alignItems: 'center', gap: 5 },
+      legendText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 },
       swatch: { width: 9, height: 9, borderRadius: 2, display: 'inline-block' },
+      tip: {
+        border: `1px solid ${tokens.borderStrong}`, background: tokens.overlay, borderRadius: 8,
+        padding: '6px 8px', fontSize: 11, color: tokens.text, boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
+      },
+      tipHead: { color: tokens.muted, marginBottom: 3 },
+      tipRow: { display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' },
+      tipLabel: { display: 'inline-flex', alignItems: 'center', gap: 5, color: tokens.muted, minWidth: 0 },
+      tipText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 104 },
+      tipValue: { fontVariantNumeric: 'tabular-nums' },
+      tipTotal: { fontVariantNumeric: 'tabular-nums', fontWeight: 650 },
       empty: { padding: '44px 0 48px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 6 },
       emptyTitle: { fontSize: 13, color: tokens.text },
       emptyHint: { fontSize: 12, color: tokens.muted },
@@ -497,7 +552,7 @@ window.__ModuleLoader__.load({
       spacer: { flex: 1 },
       chip: {
         display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 999,
-        border: `1px solid ${tokens.border}`, background: tokens.surface, fontSize: 12,
+        border: `1px solid ${tokens.borderStrong}`, background: tokens.surface, fontSize: 12,
       },
       chipText: { maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       chipClose: {
@@ -505,7 +560,7 @@ window.__ModuleLoader__.load({
         padding: '0 2px', fontSize: 14, lineHeight: 1, borderRadius: 4,
       },
       button: {
-        border: `1px solid ${tokens.border}`, background: tokens.surface, color: tokens.text,
+        border: `1px solid ${tokens.borderStrong}`, background: tokens.surface, color: tokens.text,
         borderRadius: 8, padding: '5px 10px', fontSize: 12, cursor: 'pointer', minHeight: 28,
       },
       buttonActive: { borderColor: tokens.accent, color: tokens.accent, background: tokens.bg },
@@ -516,7 +571,7 @@ window.__ModuleLoader__.load({
       },
       cards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: 8 },
       card: {
-        border: `1px solid ${tokens.border}`, background: tokens.bg, borderRadius: 10,
+        ...moduleShell,
         padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4,
       },
       cardLabel: { fontSize: 11, color: tokens.muted },
@@ -528,9 +583,8 @@ window.__ModuleLoader__.load({
       footer: { fontSize: 11, color: tokens.muted },
       // ---- flat cards ----
       flatCard: {
-        background: tokens.bg, borderRadius: 20, padding: '18px 20px',
-        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px rgba(15, 23, 42, 0.05)',
-        display: 'flex', flexDirection: 'column', gap: 14,
+        ...moduleShell, boxShadow: moduleShadow,
+        padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14,
       },
       sectionHead: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
       sectionTitle: { margin: 0, fontSize: 14, fontWeight: 650 },
@@ -558,17 +612,47 @@ window.__ModuleLoader__.load({
       metricLabel: { fontSize: 11, color: tokens.muted, whiteSpace: 'nowrap' },
       metricValue: { fontSize: 18, fontWeight: 650, fontVariantNumeric: 'tabular-nums', lineHeight: 1.25 },
       metricUnit: { fontSize: 11, fontWeight: 500, color: tokens.muted, marginLeft: 3 },
-      controlRow: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-      controlLabel: { fontSize: 11, color: tokens.muted, minWidth: 30 },
-      breakdown: { display: 'flex', flexDirection: 'column', gap: 12 },
-      breakRow: { display: 'grid', gridTemplateColumns: '10px 96px 1fr auto', alignItems: 'center', gap: 10 },
-      breakDot(color) { return { width: 8, height: 8, borderRadius: 999, background: color } },
-      breakLabel: { fontSize: 12, color: tokens.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-      track: { height: 8, borderRadius: 999, background: tokens.surface, overflow: 'hidden', minWidth: 60 },
+      // ---- unified filter toolbar (scope + range + grain) ----
+      toolbar: {
+        ...moduleShell, boxShadow: moduleShadow,
+        padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12,
+      },
+      toolbarLine: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 },
+      toolbarKey: {
+        fontSize: 11, fontWeight: 600, color: tokens.muted, textTransform: 'uppercase',
+        letterSpacing: '0.04em', width: 36, flex: 'none',
+      },
+      toolbarGroup: {
+        display: 'inline-flex', alignItems: 'center', gap: 2, padding: 3, borderRadius: 999,
+        background: tokens.track, border: `1px solid ${tokens.borderStrong}`, flexWrap: 'wrap', minWidth: 0,
+      },
+      toolbarChip(active) {
+        return {
+          border: active ? `1px solid ${tokens.accent}` : '1px solid transparent',
+          borderRadius: 999, padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 28,
+          background: active ? tints.blue : 'transparent',
+          color: active ? tokens.accent : tokens.muted,
+          fontWeight: active ? 650 : 500,
+        }
+      },
+      toolbarSelected: { display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 },
+      toolbarSelectedNote: { fontSize: 11, color: tokens.muted },
+      toolbarDate: {
+        border: `1px solid ${tokens.borderStrong}`, background: tokens.surface, color: tokens.text,
+        borderRadius: 999, padding: '4px 10px', fontSize: 12, minHeight: 28, boxSizing: 'border-box',
+      },
+      // ---- ranked rows shared by the breakdown and the model sections ----
+      rankList: { display: 'flex', flexDirection: 'column', gap: 10 },
+      rankRow: { display: 'grid', gridTemplateColumns: '10px minmax(96px, 1.2fr) 2fr auto', alignItems: 'center', gap: 10 },
+      rankDot(color) { return { width: 8, height: 8, borderRadius: 999, background: color, flex: 'none' } },
+      rankName: { fontSize: 12, color: tokens.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 },
+      rankMeta: { fontSize: 10, color: tokens.muted, fontVariantNumeric: 'tabular-nums' },
+      rankValue: { fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', textAlign: 'right', whiteSpace: 'nowrap' },
+      donutRow: { display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' },
+      track: { height: 8, borderRadius: 999, background: tokens.track, overflow: 'hidden', minWidth: 60 },
       trackFill(color, pct) {
         return { height: '100%', width: `${pct}%`, borderRadius: 999, background: color, minWidth: pct > 0 ? 6 : 0, transition: 'width 420ms ease' }
       },
-      breakValue: { fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
       overlay: {
         position: 'fixed', inset: 0, background: 'var(--dsw-alias-bg-mask-1, rgba(0,0,0,0.35))',
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40, padding: 16,
@@ -581,13 +665,13 @@ window.__ModuleLoader__.load({
       dialogHead: { padding: 12, borderBottom: `1px solid ${tokens.border}`, display: 'flex', flexDirection: 'column', gap: 8 },
       dialogTitle: { margin: 0, fontSize: 13, fontWeight: 600 },
       input: {
-        width: '100%', boxSizing: 'border-box', border: `1px solid ${tokens.border}`,
+        width: '100%', boxSizing: 'border-box', border: `1px solid ${tokens.borderStrong}`,
         background: tokens.surface, color: tokens.text, borderRadius: 8, padding: '6px 8px', fontSize: 12,
       },
       list: { overflow: 'auto', flex: 1, padding: '4px 0' },
       groupHead: {
         display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: 11,
-        color: tokens.muted, background: tokens.surface,
+        color: tokens.muted, background: tokens.track,
       },
       groupName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 },
       pickRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer' },
@@ -688,54 +772,49 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: styles.buttonPrimary, onClick: () => onApply(draft) }, t('apply')))))
     }
 
-    function Segmented({ items, value, onChange }) {
-      return h('div', { style: styles.seg, role: 'group' },
-        items.map(([key, label], index) => h('button', {
-          key, type: 'button', style: styles.segItem(value === key, index === items.length - 1),
-          'aria-pressed': value === key ? true : undefined,
-          onClick: () => onChange(key),
-        }, label)),
-      )
-    }
-
     function ScopeBar({ data, t, showRecent, compact }) {
-      const { page, selected, setSelected, sessions, pickerOpen, setPickerOpen } = data
+      const { selected, setSelected, sessions, setPickerOpen } = data
       const rows = data.selectedRows
-      return h('div', { style: styles.row },
-        showRecent && sessions.length > 0
-          ? h('button', {
-            type: 'button', style: styles.ghost,
+      const shownLimit = compact ? 3 : 8
+      const scopeItems = [
+        ...(showRecent && sessions.length > 0 ? [['recent', t('scopeRecent')]] : []),
+        ['all', t('scopeAll')],
+        ['pick', t('scopePick')],
+      ]
+      const active = selected.length === 0 ? 'all' : 'pick'
+      return h('div', { style: styles.toolbarLine },
+        h('span', { style: styles.toolbarKey }, t('scopeLabel')),
+        h('div', { style: styles.toolbarGroup, role: 'group' },
+          scopeItems.map(([key, label]) => h('button', {
+            key, type: 'button',
+            style: styles.toolbarChip(key === 'recent' ? false : key === active),
+            'aria-pressed': key !== 'recent' && key === active ? true : undefined,
             onClick: () => {
-              const latest = sessions.find(session => session.origin !== 'subagent')
-              if (latest !== undefined) setSelected([latest.id])
+              if (key === 'all') setSelected([])
+              else if (key === 'pick') setPickerOpen(true)
+              else {
+                const latest = sessions.find(session => session.origin !== 'subagent')
+                if (latest !== undefined) setSelected([latest.id])
+              }
             },
-          }, t('scopeRecent'))
-          : null,
-        h('button', {
-          type: 'button',
-          style: { ...styles.ghost, ...(selected.length === 0 ? { background: tints.blue, color: tokens.accent } : {}) },
-          'aria-pressed': selected.length === 0 ? true : undefined,
-          onClick: () => setSelected([]),
-        }, t('scopeAll')),
-        h('button', { type: 'button', style: styles.ghost, onClick: () => setPickerOpen(true) }, t('scopePick')),
+          }, label))),
         selected.length === 0
-          ? h('span', { style: styles.rowMeta }, t('emptyScope'))
-          : rows.slice(0, compact ? 4 : 10).map(session => h('span', { key: session.id, style: styles.pill },
-            h('span', { style: styles.pillName, title: session.title || session.id }, session.title || session.id),
-            h('button', {
-              type: 'button', style: styles.pillX, 'aria-label': fmt(t('removeSession'), { name: session.title || session.id }),
-              onClick: () => setSelected(current => current.filter(id => id !== session.id)),
-            }, '×'))),
-        rows.length > (compact ? 4 : 10)
-          ? h('span', { style: styles.rowMeta }, `+${rows.length - (compact ? 4 : 10)}`)
-          : null,
-        selected.length > 0
-          ? h('label', { style: { ...styles.rowMeta, display: 'inline-flex', alignItems: 'center', gap: 6 } },
-            h('input', {
-              type: 'checkbox', checked: data.includeSubagents, onChange: event => data.setIncludeSubagents(event.target.checked),
-              style: { accentColor: tokens.accent },
-            }), t('includeSubagents'))
-          : null)
+          ? h('span', { style: styles.toolbarSelectedNote }, t('emptyScope'))
+          : h('div', { style: styles.toolbarSelected },
+            rows.slice(0, shownLimit).map(session => h('span', { key: session.id, style: styles.pill },
+              h('span', { style: styles.pillName, title: session.title || session.id }, session.title || session.id),
+              h('button', {
+                type: 'button', style: styles.pillX, 'aria-label': fmt(t('removeSession'), { name: session.title || session.id }),
+                onClick: () => setSelected(current => current.filter(id => id !== session.id)),
+              }, '×'))),
+            rows.length > shownLimit
+              ? h('span', { style: styles.toolbarSelectedNote }, `+${rows.length - shownLimit}`)
+              : null,
+            h('label', { style: { ...styles.toolbarSelectedNote, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' } },
+              h('input', {
+                type: 'checkbox', checked: data.includeSubagents, onChange: event => data.setIncludeSubagents(event.target.checked),
+                style: { accentColor: tokens.accent },
+              }), t('includeSubagents'))))
     }
 
     function RangeBar({ data, t }) {
@@ -744,8 +823,9 @@ window.__ModuleLoader__.load({
         ['all', t('rangeAll')], ['custom', t('rangeCustom')],
       ]
       const grains = [['auto', t('grainAuto')], ['hour', t('grainHour')], ['day', t('grainDay')]]
-      return h('div', { style: styles.row },
-        h(Segmented, {
+      return h('div', { style: styles.toolbarLine },
+        h('span', { style: styles.toolbarKey }, t('rangeLabel')),
+        h(Chips, {
           items: presets,
           value: data.preset,
           onChange: value => {
@@ -757,39 +837,102 @@ window.__ModuleLoader__.load({
           },
         }),
         data.preset === 'custom'
-          ? h('div', { style: styles.row },
+          ? h('div', { style: styles.toolbarLine },
             h('input', {
-              style: { ...styles.input, width: 128, minHeight: 30 }, type: 'date', value: data.customFrom, max: data.customTo,
+              style: { ...styles.toolbarDate, width: 132 }, type: 'date', value: data.customFrom, max: data.customTo,
               'aria-label': t('from'),
               onChange: event => { data.setCustomFrom(event.target.value); data.applyCustom(event.target.value, data.customTo) },
             }),
-            h('span', { style: styles.rowMeta }, '→'),
+            h('span', { style: styles.toolbarSelectedNote }, '→'),
             h('input', {
-              style: { ...styles.input, width: 128, minHeight: 30 }, type: 'date', value: data.customTo, min: data.customFrom,
+              style: { ...styles.toolbarDate, width: 132 }, type: 'date', value: data.customTo, min: data.customFrom,
               'aria-label': t('to'),
               onChange: event => { data.setCustomTo(event.target.value); data.applyCustom(data.customFrom, event.target.value) },
             }))
           : null,
         h('span', { style: styles.grow }),
-        h(Segmented, { items: grains, value: data.grain, onChange: data.setGrain }))
+        h('span', { style: styles.toolbarKey }, t('grainLabel')),
+        h(Chips, { items: grains, value: data.grain, onChange: data.setGrain }))
     }
 
-    /** Layered area chart that fills the measured width instead of letterboxing. */
-    function UsageChart({ series, granularity, t }) {
+    /** Pill group used by the toolbar: one tinted track, a raised active chip. */
+    function Chips({ items, value, onChange }) {
+      return h('div', { style: styles.toolbarGroup, role: 'group' },
+        items.map(([key, label]) => h('button', {
+          key, type: 'button', style: styles.toolbarChip(value === key),
+          'aria-pressed': value === key ? true : undefined,
+          onClick: () => onChange(key),
+        }, label)))
+    }
+
+    // One geometry for every trend chart of the plugin.
+    const CHART = { height: 260, padLeft: 52, padRight: 14, padTop: 12, padBottom: 26, ticks: [0, 0.25, 0.5, 0.75, 1] }
+
+    let chartStylesInjected = false
+
+    /** Inject the tooltip keyframes once; every chart instance shares them. */
+    function ensureChartStyles() {
+      if (chartStylesInjected || typeof document === 'undefined') return
+      chartStylesInjected = true
+      const tag = document.createElement('style')
+      tag.dataset.tokenUsage = 'chart'
+      tag.textContent = '@keyframes tu-tip-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}.tu-tip{animation:tu-tip-in 140ms ease-out both}'
+      document.head.appendChild(tag)
+    }
+
+    /** The four token buckets in stack order, ready for the chart. */
+    function usageSeries(points, t) {
+      return [
+        { key: 'cacheRead', label: t('legendCache'), color: seriesColors.cacheRead, values: points.map(point => point.cacheRead) },
+        { key: 'in', label: t('legendIn'), color: seriesColors.in, values: points.map(point => point.in) },
+        { key: 'out', label: t('legendOut'), color: seriesColors.out, values: points.map(point => point.out) },
+        { key: 'cacheWrite', label: t('legendCacheWrite'), color: seriesColors.cacheWrite, values: points.map(point => point.cacheWrite) },
+      ]
+    }
+
+    /**
+     * The single trend chart of the plugin. The token trend and the per-model
+     * trend both render through it, so geometry, grid, axes, legend, draw-in
+     * animation, hover column, and tooltip stay identical. `mode: 'stacked'`
+     * layers the token buckets as filled areas, `mode: 'lines'` draws one
+     * stroke per model.
+     */
+    function TrendChart({ buckets, series, mode, granularity, t, title, emptyTitle, emptyHint }) {
       const host = useRef(null)
       const [width, setWidth] = useState(760)
       const [hover, setHover] = useState(null)
-      const height = 260
-      const padLeft = 52
-      const padRight = 14
-      const padTop = 12
-      const padBottom = 26
-
       const [progress, setProgress] = useState(0)
+      const stacked = mode === 'stacked'
       const gradId = useRef(`tu-${Math.random().toString(36).slice(2, 8)}`).current
 
+      useEffect(() => { ensureChartStyles() }, [])
+
+      // A text signature of the data keeps the draw-in animation from
+      // restarting on every render while still reacting to real changes.
+      const signature = useMemo(
+        () => JSON.stringify([buckets, series.map(item => [item.key, item.values])]),
+        [buckets, series],
+      )
+
+      const shape = useMemo(() => {
+        const count = buckets.length
+        const tops = []
+        const bases = []
+        let running = new Array(count).fill(0)
+        for (const item of series) {
+          const base = stacked ? running.slice() : new Array(count).fill(0)
+          const top = buckets.map((_, index) => base[index] + (item.values[index] ?? 0))
+          bases.push(base)
+          tops.push(top)
+          if (stacked) running = top
+        }
+        const totals = buckets.map((_, index) => series.reduce((sum, item) => sum + (item.values[index] ?? 0), 0))
+        const maxValue = Math.max(1, ...(stacked ? totals : tops.flat()))
+        return { tops, bases, totals, maxValue }
+      }, [signature, stacked])
+
       useEffect(() => {
-        if ((series ?? []).length === 0) { setProgress(1); return }
+        if (buckets.length === 0) { setProgress(1); return }
         setProgress(0)
         let frame = 0
         const start = performance.now()
@@ -800,7 +943,7 @@ window.__ModuleLoader__.load({
         }
         frame = requestAnimationFrame(step)
         return () => cancelAnimationFrame(frame)
-      }, [series, granularity])
+      }, [signature])
 
       useEffect(() => {
         const element = host.current
@@ -813,41 +956,21 @@ window.__ModuleLoader__.load({
         return () => observer.disconnect()
       }, [])
 
-      const points = series ?? []
-      if (points.length === 0) {
+      if (buckets.length === 0 || series.length === 0) {
         return h('div', { style: styles.empty },
-          h('div', { style: styles.emptyTitle }, t('chartEmpty')),
-          h('div', { style: styles.emptyHint }, t('chartEmptyHint')))
+          h('div', { style: styles.emptyTitle }, emptyTitle),
+          h('div', { style: styles.emptyHint }, emptyHint))
       }
 
-      const totalOf = point => point.in + point.out + point.cacheRead + point.cacheWrite
-      const maxValue = points.reduce((max, point) => Math.max(max, totalOf(point)), 0) || 1
-      const innerW = width - padLeft - padRight
-      const innerH = height - padTop - padBottom
-      const x = index => padLeft + (points.length === 1 ? innerW / 2 : (index / (points.length - 1)) * innerW)
-      const y = value => padTop + innerH - (value / maxValue) * innerH
+      const { tops, bases, totals, maxValue } = shape
+      const innerW = width - CHART.padLeft - CHART.padRight
+      const innerH = CHART.height - CHART.padTop - CHART.padBottom
+      const x = index => CHART.padLeft + (buckets.length === 1 ? innerW / 2 : (index / (buckets.length - 1)) * innerW)
+      const y = value => CHART.padTop + innerH - (value / maxValue) * innerH
       const scaled = value => y(value * progress)
-      const bands = [
-        { key: 'cacheRead', color: seriesColors.cacheRead },
-        { key: 'in', color: seriesColors.in },
-        { key: 'out', color: seriesColors.out },
-        { key: 'cacheWrite', color: seriesColors.cacheWrite },
-      ]
-      const baseline = points.map(() => 0)
-      const layers = []
-      for (const band of bands) {
-        const top = points.map((point, index) => baseline[index] + point[band.key])
-        const area = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(index).toFixed(1)},${scaled(top[index]).toFixed(1)}`).join(' ')
-          + ' ' + points.map((point, index) => `L${x(points.length - 1 - index).toFixed(1)},${scaled(baseline[points.length - 1 - index]).toFixed(1)}`).join(' ')
-          + ' Z'
-        layers.push({ ...band, top, area })
-        for (let index = 0; index < baseline.length; index += 1) baseline[index] = top[index]
-      }
-      const ticks = [0, 0.25, 0.5, 0.75, 1]
-      const labelEvery = Math.max(1, Math.ceil(points.length / 7))
-      const step = points.length > 1 ? x(1) - x(0) : innerW
-      // Map the pointer through the SVG's own screen matrix: arithmetic on
-      // clientX alone drifts as soon as the drawing is scaled or letterboxed.
+      const labelEvery = Math.max(1, Math.ceil(buckets.length / 7))
+      const step = buckets.length > 1 ? x(1) - x(0) : innerW
+
       const onMove = event => {
         const svg = event.currentTarget
         const matrix = svg.getScreenCTM?.()
@@ -856,88 +979,167 @@ window.__ModuleLoader__.load({
         screen.x = event.clientX
         screen.y = event.clientY
         const local = screen.matrixTransform(matrix.inverse())
-        const ratio = (local.x - padLeft) / innerW
+        const ratio = (local.x - CHART.padLeft) / innerW
         if (!Number.isFinite(ratio)) return
-        const index = Math.round(ratio * (points.length - 1))
-        setHover(Math.max(0, Math.min(points.length - 1, index)))
+        const index = Math.round(ratio * (buckets.length - 1))
+        setHover(Math.max(0, Math.min(buckets.length - 1, index)))
       }
+
+      const marks = series.map((item, index) => {
+        const top = tops[index]
+        const base = bases[index]
+        const line = top.map((value, at) => `${at === 0 ? 'M' : 'L'}${x(at).toFixed(1)},${scaled(value).toFixed(1)}`).join(' ')
+        if (!stacked) return { key: item.key, item, line }
+        const area = `${line} ` + base.map((value, at) => {
+          const back = buckets.length - 1 - at
+          return `L${x(back).toFixed(1)},${scaled(base[back]).toFixed(1)}`
+        }).join(' ') + ' Z'
+        return { key: item.key, item, line, area }
+      })
+
+      const hoverColumn = hover === null ? null : h('rect', {
+        x: Math.max(CHART.padLeft, x(hover) - step / 2), y: CHART.padTop,
+        width: Math.max(0, Math.min(step, width - CHART.padRight - Math.max(CHART.padLeft, x(hover) - step / 2))),
+        height: innerH, fill: tokens.borderStrong,
+      })
+
+      const hoverDots = hover === null ? []
+        : stacked
+          ? [h('circle', {
+            key: 'dot-total', cx: x(hover), cy: scaled(totals[hover]), r: 3.6,
+            fill: tokens.bg, stroke: series[series.length - 1].color, strokeWidth: 2,
+          })]
+          : marks.map(mark => {
+            const value = mark.item.values[hover] ?? 0
+            if (value <= 0) return null
+            return h('circle', {
+              key: `dot-${mark.key}`, cx: x(hover), cy: scaled(value), r: 3.6,
+              fill: tokens.bg, stroke: mark.item.color, strokeWidth: 2,
+            })
+          }).filter(Boolean)
 
       let tooltip = null
       if (hover !== null) {
-        const point = points[hover]
-        const left = Math.min(Math.max(x(hover), 90), width - 90)
-        const row = (name, value) => h('div', {
-          key: name, style: { display: 'flex', justifyContent: 'space-between', gap: 12 },
-        },
-        h('span', { style: { color: tokens.muted } }, name),
-        h('span', { style: { fontVariantNumeric: 'tabular-nums' } }, value))
-        tooltip = h('foreignObject', { x: left - 88, y: 4, width: 176, height: 100, style: { pointerEvents: 'none' } },
-          h('div', {
-            className: 'tu-tip',
-            xmlns: 'http://www.w3.org/1999/xhtml',
-            style: {
-              border: `1px solid ${tokens.border}`, background: tokens.overlay, borderRadius: 8,
-              padding: '6px 8px', fontSize: 11, color: tokens.text, boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
-            },
-          },
-          h('div', { style: { color: tokens.muted, marginBottom: 3 } }, formatBucket(point.bucket, granularity)),
-          row(t('cardTotal'), formatExact(totalOf(point))),
-          row(t('legendIn'), formatExact(point.in)),
-          row(t('legendOut'), formatExact(point.out)),
-          row(t('legendCache'), formatExact(point.cacheRead))))
+        const left = Math.min(Math.max(x(hover), 104), width - 104)
+        const rows = series.map(item => ({ key: item.key, label: item.label, color: item.color, value: item.values[hover] ?? 0 }))
+        const body = stacked ? rows : rows.filter(row => row.value > 0)
+        const head = stacked ? [{ key: 'total', label: t('cardTotal'), value: totals[hover] }] : []
+        const list = [...head, ...body]
+        tooltip = h('foreignObject', { x: left - 100, y: 4, width: 200, height: 34 + list.length * 16, style: { pointerEvents: 'none' } },
+          h('div', { className: 'tu-tip', xmlns: 'http://www.w3.org/1999/xhtml', style: styles.tip },
+            h('div', { style: styles.tipHead }, formatBucket(buckets[hover], granularity)),
+            list.map(row => h('div', { key: row.key, style: styles.tipRow },
+              h('span', { style: styles.tipLabel },
+                row.color === undefined ? null : h('span', { style: { ...styles.swatch, background: row.color, flex: 'none' } }),
+                h('span', { style: styles.tipText, title: row.label }, row.label)),
+              h('span', { style: row.key === 'total' ? styles.tipTotal : styles.tipValue }, formatExact(row.value))))))
       }
 
-      return h('div', { ref: host, style: { position: 'relative', width: '100%' } },
-        h('style', null,
-          '@keyframes tu-tip-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}',
-          '.tu-tip{animation:tu-tip-in 140ms ease-out both}'),
-        h('svg', {
-          viewBox: `0 0 ${width} ${height}`, width: '100%', height, role: 'img',
-          'aria-label': `${t('chartTitle')}: ${formatExact(points.reduce((sum, point) => sum + totalOf(point), 0))}`,
-          style: { display: 'block', overflow: 'visible' },
-          onMouseMove: onMove,
-          onMouseLeave: () => setHover(null),
-        },
-        h('defs', null, bands.map(band => h('linearGradient', {
-          key: band.key, id: `${gradId}-${band.key}`, x1: '0', y1: '0', x2: '0', y2: '1',
-        },
-        h('stop', { offset: '0%', stopColor: band.color, stopOpacity: 0.4 }),
-        h('stop', { offset: '100%', stopColor: band.color, stopOpacity: 0.05 })))),
-        ticks.map(tick => h('line', {
-          key: `grid-${tick}`, x1: padLeft, x2: width - padRight,
-          y1: padTop + innerH - tick * innerH, y2: padTop + innerH - tick * innerH,
-          stroke: tokens.border, strokeWidth: 1,
-        })),
-        ticks.map(tick => h('text', {
-          key: `y-${tick}`, x: padLeft - 8, y: padTop + innerH - tick * innerH + 4,
-          textAnchor: 'end', fontSize: 10, fill: tokens.muted,
-        }, formatNumber(maxValue * tick))),
-        hover === null ? null : h('rect', {
-          x: Math.max(padLeft, x(hover) - step / 2), y: padTop,
-          width: Math.max(0, Math.min(step, width - padRight - Math.max(padLeft, x(hover) - step / 2))),
-          height: innerH, fill: tokens.border, opacity: 0.45,
-        }),
-        layers.map(layer => h('path', {
-          key: layer.key, d: layer.area, fill: `url(#${gradId}-${layer.key})`, stroke: 'none',
-        })),
-        layers.map(layer => h('path', {
-          key: `line-${layer.key}`,
-          d: layer.top.map((value, index) => `${index === 0 ? 'M' : 'L'}${x(index).toFixed(1)},${scaled(value).toFixed(1)}`).join(' '),
-          fill: 'none', stroke: layer.color, strokeWidth: layer.key === 'cacheRead' ? 2 : 1.5,
-          strokeLinejoin: 'round', strokeLinecap: 'round',
-        })),
-        points.map((point, index) => (index % labelEvery === 0 || index === points.length - 1)
-          ? h('text', {
-            key: `x-${index}`, x: x(index), y: height - 8, textAnchor: 'middle', fontSize: 10, fill: tokens.muted,
-          }, formatBucket(point.bucket, granularity))
-          : null),
-        hover === null ? null : h('circle', {
-          cx: x(hover), cy: y(totalOf(points[hover])), r: 9, fill: seriesColors.cacheRead, opacity: 0.16,
-        }),
-        hover === null ? null : h('circle', {
-          cx: x(hover), cy: y(totalOf(points[hover])), r: 3.6, fill: tokens.bg, stroke: seriesColors.cacheRead, strokeWidth: 2,
-        }),
-        tooltip))
+      return h('div', { style: styles.chartBody },
+        h('div', { style: styles.legend },
+          series.map(item => h('span', { key: item.key, style: styles.legendItem },
+            h('span', { style: { ...styles.swatch, background: item.color } }),
+            h('span', { style: styles.legendText, title: item.label }, item.label)))),
+        h('div', { ref: host, style: { position: 'relative', width: '100%' } },
+          h('svg', {
+            viewBox: `0 0 ${width} ${CHART.height}`, width: '100%', height: CHART.height, role: 'img',
+            'aria-label': title, style: { display: 'block', overflow: 'visible' },
+            onMouseMove: onMove,
+            onMouseLeave: () => setHover(null),
+          },
+          stacked
+            ? h('defs', null, series.map(item => h('linearGradient', {
+              key: item.key, id: `${gradId}-${item.key}`, x1: '0', y1: '0', x2: '0', y2: '1',
+            },
+            h('stop', { offset: '0%', stopColor: item.color, stopOpacity: 0.4 }),
+            h('stop', { offset: '100%', stopColor: item.color, stopOpacity: 0.05 }))))
+            : null,
+          CHART.ticks.map(tick => h('line', {
+            key: `grid-${tick}`, x1: CHART.padLeft, x2: width - CHART.padRight,
+            y1: CHART.padTop + innerH - tick * innerH, y2: CHART.padTop + innerH - tick * innerH,
+            stroke: tokens.borderStrong, strokeWidth: 1,
+          })),
+          CHART.ticks.map(tick => h('text', {
+            key: `y-${tick}`, x: CHART.padLeft - 8, y: CHART.padTop + innerH - tick * innerH + 4,
+            textAnchor: 'end', fontSize: 10, fill: tokens.muted,
+          }, formatNumber(maxValue * tick))),
+          hoverColumn,
+          stacked ? marks.map(mark => h('path', {
+            key: `area-${mark.key}`, d: mark.area, fill: `url(#${gradId}-${mark.key})`, stroke: 'none',
+          })) : null,
+          marks.map(mark => h('path', {
+            key: `line-${mark.key}`, d: mark.line, fill: 'none', stroke: mark.item.color,
+            strokeWidth: stacked ? (mark.key === series[0].key ? 2 : 1.5) : 2,
+            strokeLinejoin: 'round', strokeLinecap: 'round',
+          })),
+          buckets.map((bucket, index) => (index % labelEvery === 0 || index === buckets.length - 1)
+            ? h('text', {
+              key: `x-${bucket}`, x: x(index), y: CHART.height - 8, textAnchor: 'middle', fontSize: 10, fill: tokens.muted,
+            }, formatBucket(bucket, granularity))
+            : null),
+          hoverDots,
+          tooltip)))
+    }
+
+    /** Stable colour per model, assigned by rank in the current window. */
+    function colorMap(models) {
+      const map = new Map()
+      models.forEach((model, index) => map.set(model.model, modelPalette[index % modelPalette.length]))
+      return map
+    }
+
+    /** Share-of-total donut for models, reusing the ring geometry of the summary. */
+    function ModelShare({ models, colors, t }) {
+      const total = models.reduce((sum, model) => sum + model.total, 0)
+      const size = 148
+      const stroke = 13
+      const radius = (size - stroke) / 2 - 2
+      const circumference = 2 * Math.PI * radius
+      const sum = total || 1
+      let travelled = 0
+      return h('div', { style: styles.donutRow },
+        h('div', { style: styles.ringWrap },
+          h('svg', { width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': true },
+            h('circle', { cx: size / 2, cy: size / 2, r: radius, fill: 'none', stroke: tokens.track, strokeWidth: stroke }),
+            models.map(model => {
+              const length = (model.total / sum) * circumference
+              const dash = `${Math.max(0, length - 3)} ${circumference}`
+              const offset = -travelled
+              travelled += length
+              return h('circle', {
+                key: model.model, cx: size / 2, cy: size / 2, r: radius, fill: 'none',
+                stroke: colors.get(model.model), strokeWidth: stroke, strokeDasharray: dash, strokeDashoffset: offset,
+                strokeLinecap: 'round', transform: `rotate(-90 ${size / 2} ${size / 2})`,
+              })
+            })),
+          h('div', { style: styles.ringCenter },
+            h('div', { style: styles.ringValue }, formatNumber(total)),
+            h('div', { style: styles.ringLabel }, t('cardTotal')))),
+        h('div', { style: { ...styles.rankList, flex: 1, minWidth: 220 } },
+          models.length === 0
+            ? h('div', { style: styles.emptyHint }, t('modelEmpty'))
+            : models.map(model => {
+              const share = total === 0 ? 0 : model.total / total
+              return h('div', { key: model.model, style: styles.rankRow },
+                h('span', { style: styles.rankDot(colors.get(model.model)) }),
+                h('span', { style: styles.rankName, title: modelLabel(model.model) }, modelLabel(model.model)),
+                h('div', { style: styles.track }, h('div', { style: styles.trackFill(colors.get(model.model), Math.round(share * 100)) })),
+                h('span', { style: styles.rankValue }, formatPercent(share)))
+            })))
+    }
+
+    /** Ranked per-model usage bars with exact figures and call counts. */
+    function ModelUsage({ models, colors, t }) {
+      const max = models.reduce((top, model) => Math.max(top, model.total), 0) || 1
+      if (models.length === 0) return h('div', { style: styles.empty }, h('div', { style: styles.emptyHint }, t('modelEmpty')))
+      return h('div', { style: styles.rankList },
+        models.map(model => h('div', { key: model.model, style: styles.rankRow },
+          h('span', { style: styles.rankDot(colors.get(model.model)) }),
+          h('div', { style: { minWidth: 0 } },
+            h('div', { style: styles.rankName, title: modelLabel(model.model) }, modelLabel(model.model)),
+            h('div', { style: styles.rankMeta }, `${t('cardCalls')} ${formatExact(model.calls)} · ${t('cardIn')} ${formatNumber(model.in)} · ${t('cardOut')} ${formatNumber(model.out)}`)),
+          h('div', { style: styles.track }, h('div', { style: styles.trackFill(colors.get(model.model), Math.round(model.total / max * 100)) })),
+          h('span', { style: styles.rankValue }, formatExact(model.total)))))
     }
 
     const ICON_PATHS = {
@@ -969,7 +1171,7 @@ window.__ModuleLoader__.load({
         h('svg', { width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': true },
           h('circle', {
             cx: size / 2, cy: size / 2, r: radius, fill: 'none',
-            stroke: tokens.surface, strokeWidth: stroke,
+            stroke: tokens.track, strokeWidth: stroke,
           }),
           parts.map(part => {
             const length = (part.value / sum) * circumference
@@ -1008,7 +1210,39 @@ window.__ModuleLoader__.load({
         { key: 'cacheWrite', label: t('legendCacheWrite'), value: totals.cacheWrite, color: seriesColors.cacheWrite },
       ]
       const sum = parts.reduce((total, part) => total + part.value, 0) || 1
+      const models = data.modelView.models
+      const modelColors = useMemo(() => colorMap(models), [models])
+
+      // Both trend cards read the same chart component, so their series are
+      // prepared here in one shape: buckets plus one value list per series.
+      const usageChart = useMemo(() => ({
+        buckets: data.view.series.map(point => point.bucket),
+        series: usageSeries(data.view.series, t),
+      }), [data.view.series, t])
+
+      const modelChart = useMemo(() => {
+        const buckets = [...new Set(data.modelView.series.map(point => point.bucket))].sort((left, right) => left - right)
+        const indexOf = new Map(buckets.map((bucket, index) => [bucket, index]))
+        const series = models.map(model => {
+          const values = new Array(buckets.length).fill(0)
+          for (const point of data.modelView.series) {
+            if (point.model !== model.model) continue
+            const index = indexOf.get(point.bucket)
+            if (index !== undefined) values[index] += point.total
+          }
+          return { key: model.model, label: modelLabel(model.model), color: modelColors.get(model.model), values }
+        })
+        return { buckets, series }
+      }, [data.modelView.series, models, modelColors])
+
       return h('div', { style: styles.dash },
+        // Filters first: scope and range govern every card below, so they lead.
+        h('section', { style: styles.toolbar },
+          h(ScopeBar, { data, t, showRecent: false, compact: true }),
+          h(RangeBar, { data, t }),
+          data.customError !== null ? h('div', { style: styles.notice, role: 'alert' }, data.customError) : null,
+          data.error !== null ? h('div', { style: styles.error, role: 'alert' }, `${t('failed')}: ${data.error}`) : null),
+
         h('section', { style: styles.flatCard, 'aria-busy': data.loading },
           h('div', { style: styles.sectionHead },
             h('div', { style: styles.iconChip(tints.blue) }, h(Icon, { name: 'spark', color: tokens.accent })),
@@ -1029,20 +1263,16 @@ window.__ModuleLoader__.load({
               h(FlatMetric, { icon: 'pulse', color: seriesColors.cacheWrite, tint: tints.violet, label: t('cardCalls'), value: totals.calls, format: formatNumber })))),
 
         h('section', { style: styles.flatCard },
-          h('div', { style: styles.controlRow },
-            h('span', { style: styles.controlLabel }, t('scopeLabel')),
-            h(ScopeBar, { data, t, showRecent: false, compact: true })),
-          h('div', { style: styles.controlRow }, h(RangeBar, { data, t })),
-          data.customError !== null ? h('div', { style: styles.notice, role: 'alert' }, data.customError) : null,
-          data.error !== null ? h('div', { style: styles.error, role: 'alert' }, `${t('failed')}: ${data.error}`) : null),
-
-        h('section', { style: styles.flatCard },
           h('div', { style: styles.sectionHead },
             h('div', { style: styles.iconChip(tints.green) }, h(Icon, { name: 'pulse', color: seriesColors.out })),
             h('h2', { style: styles.sectionTitle }, t('chartTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.pill }, data.view.granularity === 'hour' ? t('grainHour') : t('grainDay'))),
-          h(UsageChart, { series: data.view.series, granularity: data.view.granularity, t })),
+          h(TrendChart, {
+            buckets: usageChart.buckets, series: usageChart.series, mode: 'stacked',
+            granularity: data.view.granularity, t, title: t('chartTitle'),
+            emptyTitle: t('chartEmpty'), emptyHint: t('chartEmptyHint'),
+          })),
 
         h('section', { style: styles.flatCard },
           h('div', { style: styles.sectionHead },
@@ -1050,12 +1280,40 @@ window.__ModuleLoader__.load({
             h('h2', { style: styles.sectionTitle }, t('breakdownTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.sectionSub }, t('breakdownSub'))),
-          h('div', { style: styles.breakdown },
-            parts.map(part => h('div', { key: part.key, style: styles.breakRow },
-              h('span', { style: styles.breakDot(part.color) }),
-              h('span', { style: styles.breakLabel }, part.label),
+          h('div', { style: styles.rankList },
+            parts.map(part => h('div', { key: part.key, style: styles.rankRow },
+              h('span', { style: styles.rankDot(part.color) }),
+              h('span', { style: styles.rankName }, part.label),
               h('div', { style: styles.track }, h('div', { style: styles.trackFill(part.color, Math.round(part.value / sum * 100)) })),
-              h('span', { style: styles.breakValue }, formatExact(part.value)))))),
+              h('span', { style: styles.rankValue }, formatExact(part.value)))))),
+
+        h('section', { style: styles.flatCard },
+          h('div', { style: styles.sectionHead },
+            h('div', { style: styles.iconChip(tints.violet) }, h(Icon, { name: 'spark', color: seriesColors.cacheWrite })),
+            h('h2', { style: styles.sectionTitle }, t('modelShareTitle')),
+            h('span', { style: styles.grow }),
+            h('span', { style: styles.sectionSub }, t('modelShareSub'))),
+          h(ModelShare, { models, colors: modelColors, t })),
+
+        h('section', { style: styles.flatCard },
+          h('div', { style: styles.sectionHead },
+            h('div', { style: styles.iconChip(tints.blue) }, h(Icon, { name: 'db', color: seriesColors.cacheRead })),
+            h('h2', { style: styles.sectionTitle }, t('modelUsageTitle')),
+            h('span', { style: styles.grow }),
+            h('span', { style: styles.sectionSub }, t('modelUsageSub'))),
+          h(ModelUsage, { models, colors: modelColors, t })),
+
+        h('section', { style: styles.flatCard },
+          h('div', { style: styles.sectionHead },
+            h('div', { style: styles.iconChip(tints.green) }, h(Icon, { name: 'pulse', color: seriesColors.out })),
+            h('h2', { style: styles.sectionTitle }, t('modelTrendTitle')),
+            h('span', { style: styles.grow }),
+            h('span', { style: styles.pill }, data.modelView.granularity === 'hour' ? t('grainHour') : t('grainDay'))),
+          h(TrendChart, {
+            buckets: modelChart.buckets, series: modelChart.series, mode: 'lines',
+            granularity: data.modelView.granularity, t, title: t('modelTrendTitle'),
+            emptyTitle: t('modelEmpty'), emptyHint: t('chartEmptyHint'),
+          })),
 
         h('div', { style: styles.footer },
           data.updatedAt === null ? null : fmt(t('updatedAt'), { time: formatClock(data.updatedAt) }),
@@ -1088,6 +1346,10 @@ window.__ModuleLoader__.load({
         { label: t('cardHit'), value: formatPercent(totals.cacheHitRate) },
         { label: t('cardCalls'), value: formatNumber(totals.calls), hint: formatExact(totals.calls) },
       ]
+      const usageChart = useMemo(() => ({
+        buckets: data.view.series.map(point => point.bucket),
+        series: usageSeries(data.view.series, t),
+      }), [data.view.series, t])
       return h('div', { style: styles.page },
         h('div', { style: styles.header },
           h('h2', { style: styles.title }, t('title')),
@@ -1114,14 +1376,13 @@ window.__ModuleLoader__.load({
         h('div', { style: styles.chartCard },
           h('div', { style: styles.chartHead },
             h('span', { style: styles.chartTitle }, t('chartTitle')),
-            h('span', { style: styles.legend },
-              h('span', { style: styles.legendItem }, h('span', { style: { ...styles.swatch, background: seriesColors.in } }), t('legendIn')),
-              h('span', { style: styles.legendItem }, h('span', { style: { ...styles.swatch, background: seriesColors.out } }), t('legendOut')),
-              h('span', { style: styles.legendItem }, h('span', { style: { ...styles.swatch, background: seriesColors.cacheRead } }), t('legendCache')),
-              h('span', { style: styles.legendItem }, h('span', { style: { ...styles.swatch, background: seriesColors.cacheWrite } }), t('legendCacheWrite'))),
             h('span', { style: styles.spacer }),
             h('span', { style: styles.chartFoot }, data.view.granularity === 'hour' ? t('grainHour') : t('grainDay'))),
-          h(UsageChart, { series: data.view.series, granularity: data.view.granularity, t })),
+          h(TrendChart, {
+            buckets: usageChart.buckets, series: usageChart.series, mode: 'stacked',
+            granularity: data.view.granularity, t, title: t('chartTitle'),
+            emptyTitle: t('chartEmpty'), emptyHint: t('chartEmptyHint'),
+          })),
 
         h('div', { style: styles.footer },
           data.updatedAt === null ? null : fmt(t('updatedAt'), { time: formatClock(data.updatedAt) }),
