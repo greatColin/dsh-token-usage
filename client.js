@@ -82,7 +82,7 @@ window.__ModuleLoader__.load({
       modelUsageSub: '按模型合计',
       modelTrendTitle: '模型用量趋势',
       modelEmpty: '这个范围内没有模型调用。',
-      syncInfo: '扫描 {files} 个文件，更新 {changed} 个，耗时 {ms} ms',
+      syncInfo: '检查 {files} 个会话文件，更新 {changed} 个，耗时 {ms} ms',
     }
 
     const en = {
@@ -158,7 +158,7 @@ window.__ModuleLoader__.load({
       modelUsageSub: 'Totals per model',
       modelTrendTitle: 'Model trend',
       modelEmpty: 'No model calls in this range.',
-      syncInfo: 'Scanned {files} files, {changed} updated, {ms} ms',
+      syncInfo: 'Checked {files} session files, {changed} updated, {ms} ms',
     }
 
     function pad(value) {
