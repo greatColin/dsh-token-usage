@@ -425,22 +425,31 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // The plugin paints its own light surface: a pastel field with frosted
+    // glass panels floating on top. The colours are fixed instead of theme
+    // tokens, so the plugin keeps the same look in every host theme.
     const tokens = {
-      bg: 'var(--dsw-alias-bg-layer-1)',
-      surface: 'var(--dsw-alias-bg-layer-2)',
-      // The background layers collapse to one colour in the light theme, so a
-      // control track takes its tint from the label ink instead.
-      track: 'color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent)',
-      border: 'var(--dsw-alias-border-l1)',
-      borderStrong: 'var(--dsw-alias-border-l2)',
-      text: 'var(--dsw-alias-label-primary)',
-      muted: 'var(--dsw-alias-label-secondary)',
-      error: 'var(--dsw-alias-state-error-primary)',
-      accent: 'var(--dsw-static-blue-500, #3b82f6)',
-      warn: 'var(--dsw-static-amber-600, #d97706)',
-      overlay: 'var(--dsw-alias-bg-overlay)',
-      radius: 'var(--dsw-radius-lg, 16px)',
-      radiusSmall: 'var(--dsw-radius-md, 12px)',
+      text: '#141821',
+      muted: '#5c6474',
+      error: '#d92d20',
+      accent: '#2f6bf6',
+      warn: '#b45309',
+      // Glass fills.
+      surface: 'rgba(255, 255, 255, 0.42)',
+      field: 'rgba(255, 255, 255, 0.68)',
+      solid: 'rgba(255, 255, 255, 0.74)',
+      // Hairlines and tracks read as ink on the light glass.
+      track: 'rgba(20, 24, 33, 0.08)',
+      border: 'rgba(20, 24, 33, 0.10)',
+      borderStrong: 'rgba(20, 24, 33, 0.16)',
+      hoverBand: 'rgba(20, 24, 33, 0.05)',
+      overlay: 'rgba(31, 38, 58, 0.34)',
+      radius: '20px',
+      radiusSmall: '14px',
+      blur: 'blur(15px) saturate(1.8)',
+      // A shadow in ink reads as a drop shadow on the pastel field.
+      shadow: 'rgba(31, 38, 58, 0.16)',
+      edge: 'inset 0 1px 0 rgba(255, 255, 255, 0.4)',
     }
 
     // Data colors are deliberately static palette tokens, not semantic aliases:
@@ -472,45 +481,44 @@ window.__ModuleLoader__.load({
     // Flat-card palette: card surfaces come from theme surfaces, data accents
     // from the static palette, and tints are the same hues at low alpha.
     const tints = {
-      blue: 'rgba(59, 130, 246, 0.13)',
+      blue: 'rgba(59, 130, 246, 0.14)',
       green: 'rgba(34, 197, 94, 0.13)',
       amber: 'rgba(245, 158, 11, 0.15)',
       violet: 'rgba(139, 92, 246, 0.14)',
       red: 'rgba(239, 68, 68, 0.13)',
     }
 
-    // Every module surface shares one fill, one border, and one radius, so the
-    // toolbar and the cards below it read as a single family.
-    const moduleShell = {
-      background: tokens.bg,
-      border: `1px solid ${tokens.borderStrong}`,
-      borderRadius: tokens.radius,
-    }
-    const moduleShadow = '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.05)'
+    // Every module surface is one piece of liquid glass: the `tu-glass` class
+    // carries the frosted recipe and the shine sweep, the shared inline style
+    // keeps the toolbar and the cards below it in one family.
+    const moduleShell = { position: 'relative', overflow: 'hidden' }
 
     const styles = {
       // ---- dashboard shell ----
+      // The stage carries the field the panels float on; the dashboard column
+      // is the centred list of panels.
+      stage: {
+        position: 'relative', isolation: 'isolate', width: '100%', minHeight: '100%',
+        display: 'flex', justifyContent: 'center', boxSizing: 'border-box',
+      },
       dash: {
-        display: 'flex', flexDirection: 'column', gap: 14, color: tokens.text,
-        background: tokens.surface, minHeight: '100%',
-        padding: '20px 24px 40px', maxWidth: 1120, margin: '0 auto', width: '100%', boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', gap: 16, color: tokens.text,
+        padding: '22px 26px 44px', maxWidth: 1180, margin: '0 auto', width: '100%', boxSizing: 'border-box',
       },
-      dashHead: { display: 'flex', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' },
-      dashTitle: { margin: 0, fontSize: 19, fontWeight: 650, letterSpacing: '-0.01em' },
-      dashSub: { margin: '3px 0 0', fontSize: 12, color: tokens.muted },
-      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       grow: { flex: 1 },
-      ghost: {
-        border: 0, background: 'transparent', color: tokens.muted,
-        borderRadius: 999, padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 30, fontWeight: 500,
-      },
-      quiet: {
-        border: 0, background: 'transparent', color: tokens.muted,
-        borderRadius: 999, padding: '6px 10px', fontSize: 12, cursor: 'pointer', minHeight: 30,
+      // Round glass button, the shape the reference uses for its actions.
+      circle: {
+        width: 34, height: 34, borderRadius: 999, flex: 'none',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: tokens.surface, backdropFilter: tokens.blur, WebkitBackdropFilter: tokens.blur,
+        border: '1px solid rgba(255, 255, 255, 0.55)', color: tokens.muted, cursor: 'pointer',
+        boxShadow: `0 12px 24px -14px ${tokens.shadow}, ${tokens.edge}`,
       },
       pill: {
-        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999,
-        background: tints.blue, color: tokens.accent, fontSize: 12, maxWidth: 260,
+        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 999,
+        background: tokens.surface, border: '1px solid rgba(255, 255, 255, 0.55)', color: tokens.accent,
+        fontSize: 11, fontWeight: 600, maxWidth: 260,
+        backdropFilter: tokens.blur, WebkitBackdropFilter: tokens.blur,
       },
       pillName: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       pillX: {
@@ -520,8 +528,8 @@ window.__ModuleLoader__.load({
       linkish: { border: 0, background: 'transparent', color: tokens.muted, fontSize: 12, cursor: 'pointer', padding: '2px 4px', borderRadius: 4 },
       // ---- chart ----
       chartCard: {
-        ...moduleShell, boxShadow: moduleShadow,
-        padding: '14px 16px 6px', display: 'flex', flexDirection: 'column', gap: 10,
+        ...moduleShell,
+        padding: '16px 18px 8px', display: 'flex', flexDirection: 'column', gap: 10,
       },
       chartHead: { display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
       chartTitle: { fontSize: 12, fontWeight: 600, color: tokens.text },
@@ -531,8 +539,9 @@ window.__ModuleLoader__.load({
       legendText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 },
       swatch: { width: 9, height: 9, borderRadius: 2, display: 'inline-block' },
       tip: {
-        border: `1px solid ${tokens.borderStrong}`, background: tokens.overlay, borderRadius: 8,
-        padding: '6px 8px', fontSize: 11, color: tokens.text, boxShadow: '0 6px 18px rgba(0,0,0,0.18)',
+        border: '1px solid rgba(255, 255, 255, 0.6)', background: 'rgba(255, 255, 255, 0.86)', borderRadius: 12,
+        padding: '8px 10px', fontSize: 11, color: tokens.text,
+        boxShadow: `0 18px 36px -18px ${tokens.shadow}, ${tokens.edge}`,
       },
       tipHead: { color: tokens.muted, marginBottom: 3 },
       tipRow: { display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' },
@@ -544,55 +553,58 @@ window.__ModuleLoader__.load({
       emptyTitle: { fontSize: 13, color: tokens.text },
       emptyHint: { fontSize: 12, color: tokens.muted },
       // ---- settings surface (unchanged visual language) ----
-      page: { display: 'flex', flexDirection: 'column', gap: 14, color: tokens.text },
+      page: {
+        position: 'relative', isolation: 'isolate', width: '100%', boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', gap: 16, color: tokens.text,
+      },
       header: { display: 'flex', flexDirection: 'column', gap: 4 },
       title: { margin: 0, fontSize: 17, fontWeight: 600 },
       subtitle: { margin: 0, fontSize: 12, lineHeight: 1.5, color: tokens.muted },
       bar: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
       spacer: { flex: 1 },
-      chip: {
-        display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 999,
-        border: `1px solid ${tokens.borderStrong}`, background: tokens.surface, fontSize: 12,
-      },
-      chipText: { maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-      chipClose: {
-        border: 0, background: 'transparent', color: tokens.muted, cursor: 'pointer',
-        padding: '0 2px', fontSize: 14, lineHeight: 1, borderRadius: 4,
-      },
       button: {
-        border: `1px solid ${tokens.borderStrong}`, background: tokens.surface, color: tokens.text,
-        borderRadius: 8, padding: '5px 10px', fontSize: 12, cursor: 'pointer', minHeight: 28,
+        border: '1px solid rgba(255, 255, 255, 0.55)', background: tokens.surface, color: tokens.text,
+        borderRadius: 999, padding: '6px 14px', fontSize: 12, cursor: 'pointer', minHeight: 30,
+        backdropFilter: tokens.blur, WebkitBackdropFilter: tokens.blur,
+        boxShadow: `0 8px 18px -12px ${tokens.shadow}`,
       },
-      buttonActive: { borderColor: tokens.accent, color: tokens.accent, background: tokens.bg },
       buttonDisabled: { opacity: 0.5, cursor: 'default' },
+      // The one saturated control of the page, like the play button of the
+      // reference: a gradient pill with a coloured glow.
       buttonPrimary: {
-        border: `1px solid ${tokens.accent}`, background: tokens.accent, color: 'var(--dsw-alias-bg-base)',
-        borderRadius: 8, padding: '5px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, minHeight: 28,
+        border: 0, color: '#fff',
+        background: 'linear-gradient(135deg, #6ea8fe, #2f6bf6)',
+        borderRadius: 999, padding: '7px 16px', fontSize: 12, cursor: 'pointer', fontWeight: 650, minHeight: 30,
+        boxShadow: '0 14px 26px -14px #2f6bf6',
       },
-      cards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: 8 },
+      cards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(116px, 1fr))', gap: 12 },
       card: {
         ...moduleShell,
-        padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4,
+        padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 4,
       },
       cardLabel: { fontSize: 11, color: tokens.muted },
       cardValue: { fontSize: 18, fontWeight: 600, fontVariantNumeric: 'tabular-nums' },
       cardHint: { fontSize: 10, color: tokens.muted, fontVariantNumeric: 'tabular-nums' },
       chartFoot: { fontSize: 11, color: tokens.muted },
-      error: { padding: '8px 12px', borderRadius: 8, fontSize: 12, color: tokens.error, border: `1px solid ${tokens.error}` },
+      error: { padding: '10px 14px', borderRadius: tokens.radiusSmall, fontSize: 12, color: tokens.error, border: `1px solid ${tokens.error}` },
       notice: { fontSize: 11, color: tokens.warn },
-      footer: { fontSize: 11, color: tokens.muted },
+      footer: { fontSize: 11, color: tokens.muted, paddingTop: 2 },
       // ---- flat cards ----
       flatCard: {
-        ...moduleShell, boxShadow: moduleShadow,
-        padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14,
+        ...moduleShell,
+        padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16,
       },
-      sectionHead: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-      sectionTitle: { margin: 0, fontSize: 14, fontWeight: 650 },
-      sectionSub: { margin: 0, fontSize: 11, color: tokens.muted },
-      iconChip(bg) {
+      sectionHead: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
+      sectionTitle: { margin: 0, fontSize: 15, fontWeight: 650, letterSpacing: '-0.01em' },
+      sectionSub: { margin: 0, fontSize: 11, color: tokens.muted, letterSpacing: '0.02em' },
+      // A small gradient tile, the shape the reference uses for its artwork.
+      iconChip(color, tint) {
         return {
-          width: 36, height: 36, borderRadius: 12, background: bg,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
+          width: 38, height: 38, borderRadius: 13, flex: 'none',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: `linear-gradient(135deg, ${color}, ${tint})`,
+          border: '1px solid rgba(255, 255, 255, 0.55)',
+          boxShadow: `0 12px 22px -14px ${color}, ${tokens.edge}`,
         }
       },
       heroRow: { display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' },
@@ -601,7 +613,7 @@ window.__ModuleLoader__.load({
         position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', gap: 1, pointerEvents: 'none',
       },
-      ringValue: { fontSize: 24, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' },
+      ringValue: { fontSize: 26, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' },
       ringLabel: { fontSize: 10, color: tokens.muted },
       ringHit: { fontSize: 10, color: tokens.muted, marginTop: 2 },
       metricGrid: {
@@ -609,37 +621,40 @@ window.__ModuleLoader__.load({
         gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))',
       },
       metric: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 },
-      metricLabel: { fontSize: 11, color: tokens.muted, whiteSpace: 'nowrap' },
-      metricValue: { fontSize: 18, fontWeight: 650, fontVariantNumeric: 'tabular-nums', lineHeight: 1.25 },
-      metricUnit: { fontSize: 11, fontWeight: 500, color: tokens.muted, marginLeft: 3 },
+      metricLabel: { fontSize: 11, color: tokens.muted, whiteSpace: 'nowrap', letterSpacing: '0.02em' },
+      metricValue: { fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', lineHeight: 1.25, letterSpacing: '-0.01em' },
       // ---- unified filter toolbar (scope + range + grain) ----
       toolbar: {
-        ...moduleShell, boxShadow: moduleShadow,
-        padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12,
+        ...moduleShell,
+        padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 12,
       },
       toolbarLine: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 },
       toolbarKey: {
-        fontSize: 11, fontWeight: 600, color: tokens.muted, textTransform: 'uppercase',
-        letterSpacing: '0.04em', width: 36, flex: 'none',
+        fontSize: 11, fontWeight: 650, color: tokens.muted, textTransform: 'uppercase',
+        letterSpacing: '0.08em', width: 40, flex: 'none',
       },
       toolbarGroup: {
-        display: 'inline-flex', alignItems: 'center', gap: 2, padding: 3, borderRadius: 999,
-        background: tokens.track, border: `1px solid ${tokens.borderStrong}`, flexWrap: 'wrap', minWidth: 0,
+        display: 'inline-flex', alignItems: 'center', gap: 2, padding: 4, borderRadius: 999,
+        background: tokens.track, border: `1px solid ${tokens.border}`, flexWrap: 'wrap', minWidth: 0,
       },
+      // The selected chip reads as a raised frosted pill, the shape the
+      // reference uses for its active tabs.
       toolbarChip(active) {
         return {
-          border: active ? `1px solid ${tokens.accent}` : '1px solid transparent',
-          borderRadius: 999, padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 28,
-          background: active ? tints.blue : 'transparent',
-          color: active ? tokens.accent : tokens.muted,
+          border: '1px solid transparent',
+          borderRadius: 999, padding: '6px 14px', fontSize: 12, cursor: 'pointer', minHeight: 30,
+          background: active ? 'rgba(255, 255, 255, 0.92)' : 'transparent',
+          color: active ? tokens.text : tokens.muted,
           fontWeight: active ? 650 : 500,
+          boxShadow: active ? `0 8px 18px -10px ${tokens.shadow}, ${tokens.edge}` : 'none',
+          transition: 'background 160ms ease, color 160ms ease',
         }
       },
       toolbarSelected: { display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 },
       toolbarSelectedNote: { fontSize: 11, color: tokens.muted },
       toolbarDate: {
-        border: `1px solid ${tokens.borderStrong}`, background: tokens.surface, color: tokens.text,
-        borderRadius: 999, padding: '4px 10px', fontSize: 12, minHeight: 28, boxSizing: 'border-box',
+        border: `1px solid ${tokens.borderStrong}`, background: tokens.field, color: tokens.text,
+        borderRadius: 999, padding: '5px 12px', fontSize: 12, minHeight: 30, boxSizing: 'border-box',
       },
       // ---- ranked rows shared by the breakdown and the model sections ----
       rankList: { display: 'flex', flexDirection: 'column', gap: 10 },
@@ -651,22 +666,29 @@ window.__ModuleLoader__.load({
       donutRow: { display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' },
       track: { height: 8, borderRadius: 999, background: tokens.track, overflow: 'hidden', minWidth: 60 },
       trackFill(color, pct) {
-        return { height: '100%', width: `${pct}%`, borderRadius: 999, background: color, minWidth: pct > 0 ? 6 : 0, transition: 'width 420ms ease' }
+        return {
+          height: '100%', width: `${pct}%`, borderRadius: 999, minWidth: pct > 0 ? 6 : 0,
+          background: `linear-gradient(90deg, color-mix(in srgb, ${color} 55%, white), ${color})`,
+          boxShadow: `0 0 12px -2px ${color}`,
+          transition: 'width 420ms ease',
+        }
       },
       overlay: {
-        position: 'fixed', inset: 0, background: 'var(--dsw-alias-bg-mask-1, rgba(0,0,0,0.35))',
+        position: 'fixed', inset: 0, background: tokens.overlay,
         display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 40, padding: 16,
       },
       dialog: {
         width: 'min(560px, 100%)', maxHeight: 'min(72vh, 640px)', display: 'flex', flexDirection: 'column',
-        background: tokens.overlay, border: `1px solid ${tokens.border}`, borderRadius: 12, overflow: 'hidden',
-        boxShadow: '0 12px 40px var(--dsw-alias-bg-mask-1, rgba(0,0,0,0.28))',
+        background: 'rgba(255, 255, 255, 0.82)', border: '1px solid rgba(255, 255, 255, 0.6)',
+        borderRadius: 20, overflow: 'hidden',
+        backdropFilter: tokens.blur, WebkitBackdropFilter: tokens.blur,
+        boxShadow: `0 40px 80px -40px ${tokens.shadow}, ${tokens.edge}`,
       },
       dialogHead: { padding: 12, borderBottom: `1px solid ${tokens.border}`, display: 'flex', flexDirection: 'column', gap: 8 },
       dialogTitle: { margin: 0, fontSize: 13, fontWeight: 600 },
       input: {
         width: '100%', boxSizing: 'border-box', border: `1px solid ${tokens.borderStrong}`,
-        background: tokens.surface, color: tokens.text, borderRadius: 8, padding: '6px 8px', fontSize: 12,
+        background: tokens.field, color: tokens.text, borderRadius: 10, padding: '7px 10px', fontSize: 12,
       },
       list: { overflow: 'auto', flex: 1, padding: '4px 0' },
       groupHead: {
@@ -880,6 +902,46 @@ window.__ModuleLoader__.load({
       document.head.appendChild(tag)
     }
 
+    let stageStylesInjected = false
+
+    /**
+     * Inject the liquid glass recipe and the pastel field once. Every panel of
+     * the plugin wears the same frosted skin, and the shine sweep running
+     * across it is what makes the surface read as glass.
+     */
+    function ensureStageStyles() {
+      if (stageStylesInjected || typeof document === 'undefined') return
+      stageStylesInjected = true
+      const tag = document.createElement('style')
+      tag.dataset.tokenUsage = 'stage'
+      tag.textContent = [
+        // The liquid glass recipe every panel shares.
+        '.tu-glass{position:relative;overflow:hidden;',
+        'background:linear-gradient(135deg,rgba(255,255,255,.25) 0%,rgba(255,255,255,.1) 100%);',
+        'backdrop-filter:blur(15px) saturate(1.8);-webkit-backdrop-filter:blur(15px) saturate(1.8);',
+        'border:1px solid rgba(255,255,255,.3);border-radius:20px;',
+        'box-shadow:0 8px 32px rgba(0,0,0,.15),inset 0 1px 0 rgba(255,255,255,.4)}',
+        '.tu-glass::before{content:"";position:absolute;top:0;left:-100%;width:100%;height:100%;',
+        'background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);',
+        'animation:tu-shine 4s infinite;pointer-events:none}',
+        '@keyframes tu-shine{0%{left:-100%}100%{left:100%}}',
+        // The field the glass floats on: the same white the chat surface uses
+        // (`--dsw-alias-bg-base` resolves to #fff in the light theme), so the
+        // plugin sits on the conversation background instead of its own field.
+        '.tu-stage{position:relative;isolation:isolate;background:#fff}',
+        // A quieter field for the settings section.
+        '.tu-stage-soft{background:#fff}',
+        // Stagger the shine so the panels light up one after another.
+        '.tu-dash>.tu-glass:nth-child(2)::before{animation-delay:.5s}',
+        '.tu-dash>.tu-glass:nth-child(3)::before{animation-delay:1s}',
+        '.tu-dash>.tu-glass:nth-child(4)::before{animation-delay:1.5s}',
+        '.tu-dash>.tu-glass:nth-child(5)::before{animation-delay:2s}',
+        '.tu-dash>.tu-glass:nth-child(6)::before{animation-delay:2.5s}',
+        '.tu-dash>.tu-glass:nth-child(7)::before{animation-delay:3s}',
+      ].join('')
+      document.head.appendChild(tag)
+    }
+
     /** The four token buckets in stack order, ready for the chart. */
     function usageSeries(points, t) {
       return [
@@ -1000,21 +1062,21 @@ window.__ModuleLoader__.load({
       const hoverColumn = hover === null ? null : h('rect', {
         x: Math.max(CHART.padLeft, x(hover) - step / 2), y: CHART.padTop,
         width: Math.max(0, Math.min(step, width - CHART.padRight - Math.max(CHART.padLeft, x(hover) - step / 2))),
-        height: innerH, fill: tokens.borderStrong,
+        height: innerH, fill: tokens.hoverBand,
       })
 
       const hoverDots = hover === null ? []
         : stacked
           ? [h('circle', {
             key: 'dot-total', cx: x(hover), cy: scaled(totals[hover]), r: 3.6,
-            fill: tokens.bg, stroke: series[series.length - 1].color, strokeWidth: 2,
+            fill: tokens.solid, stroke: series[series.length - 1].color, strokeWidth: 2,
           })]
           : marks.map(mark => {
             const value = mark.item.values[hover] ?? 0
             if (value <= 0) return null
             return h('circle', {
               key: `dot-${mark.key}`, cx: x(hover), cy: scaled(value), r: 3.6,
-              fill: tokens.bg, stroke: mark.item.color, strokeWidth: 2,
+              fill: tokens.solid, stroke: mark.item.color, strokeWidth: 2,
             })
           }).filter(Boolean)
 
@@ -1057,7 +1119,7 @@ window.__ModuleLoader__.load({
           CHART.ticks.map(tick => h('line', {
             key: `grid-${tick}`, x1: CHART.padLeft, x2: width - CHART.padRight,
             y1: CHART.padTop + innerH - tick * innerH, y2: CHART.padTop + innerH - tick * innerH,
-            stroke: tokens.borderStrong, strokeWidth: 1,
+            stroke: tokens.border, strokeWidth: 1,
           })),
           CHART.ticks.map(tick => h('text', {
             key: `y-${tick}`, x: CHART.padLeft - 8, y: CHART.padTop + innerH - tick * innerH + 4,
@@ -1069,8 +1131,11 @@ window.__ModuleLoader__.load({
           })) : null,
           marks.map(mark => h('path', {
             key: `line-${mark.key}`, d: mark.line, fill: 'none', stroke: mark.item.color,
-            strokeWidth: stacked ? (mark.key === series[0].key ? 2 : 1.5) : 2,
+            strokeWidth: stacked ? (mark.key === series[0].key ? 2 : 1.5) : 2.2,
             strokeLinejoin: 'round', strokeLinecap: 'round',
+            style: stacked
+              ? undefined
+              : { filter: `drop-shadow(0 6px 10px color-mix(in srgb, ${mark.item.color} 45%, transparent))` },
           })),
           buckets.map((bucket, index) => (index % labelEvery === 0 || index === buckets.length - 1)
             ? h('text', {
@@ -1099,7 +1164,10 @@ window.__ModuleLoader__.load({
       let travelled = 0
       return h('div', { style: styles.donutRow },
         h('div', { style: styles.ringWrap },
-          h('svg', { width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': true },
+          h('svg', {
+            width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': true,
+            style: { filter: 'drop-shadow(0 10px 18px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent))' },
+          },
             h('circle', { cx: size / 2, cy: size / 2, r: radius, fill: 'none', stroke: tokens.track, strokeWidth: stroke }),
             models.map(model => {
               const length = (model.total / sum) * circumference
@@ -1168,7 +1236,10 @@ window.__ModuleLoader__.load({
       const sum = parts.reduce((accumulated, part) => accumulated + part.value, 0) || 1
       let travelled = 0
       return h('div', { style: styles.ringWrap },
-        h('svg', { width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': true },
+        h('svg', {
+          width: size, height: size, viewBox: `0 0 ${size} ${size}`, 'aria-hidden': true,
+          style: { filter: 'drop-shadow(0 10px 18px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent))' },
+        },
           h('circle', {
             cx: size / 2, cy: size / 2, r: radius, fill: 'none',
             stroke: tokens.track, strokeWidth: stroke,
@@ -1193,7 +1264,7 @@ window.__ModuleLoader__.load({
     function FlatMetric({ icon, color, tint, label, value, format }) {
       const animated = useCountUp(value)
       return h('div', { style: styles.metric },
-        h('div', { style: styles.iconChip(tint) }, h(Icon, { name: icon, color, size: 17 })),
+        h('div', { style: styles.iconChip(color, tint) }, h(Icon, { name: icon, color: '#fff', size: 17 })),
         h('div', { style: { minWidth: 0 } },
           h('div', { style: styles.metricLabel }, label),
           h('div', { style: styles.metricValue }, format(animated))))
@@ -1202,6 +1273,7 @@ window.__ModuleLoader__.load({
     /** Main-column dashboard: flat cards, a ring summary, and a soft area chart. */
     function UsageDashboard({ t, sessionId }) {
       const data = useUsageData(t, sessionId, 'all')
+      useEffect(() => { ensureStageStyles() }, [])
       const totals = data.totals
       const parts = [
         { key: 'cacheRead', label: t('legendCache'), value: totals.cacheRead, color: seriesColors.cacheRead },
@@ -1235,25 +1307,27 @@ window.__ModuleLoader__.load({
         return { buckets, series }
       }, [data.modelView.series, models, modelColors])
 
-      return h('div', { style: styles.dash },
+      // The stage paints the ambient wash; the dashboard column floats on it.
+      return h('div', { className: 'tu-stage', style: styles.stage },
+        h('div', { className: 'tu-dash', style: styles.dash },
         // Filters first: scope and range govern every card below, so they lead.
-        h('section', { style: styles.toolbar },
+        h('section', { className: 'tu-glass', style: styles.toolbar },
           h(ScopeBar, { data, t, showRecent: false, compact: true }),
           h(RangeBar, { data, t }),
           data.customError !== null ? h('div', { style: styles.notice, role: 'alert' }, data.customError) : null,
           data.error !== null ? h('div', { style: styles.error, role: 'alert' }, `${t('failed')}: ${data.error}`) : null),
 
-        h('section', { style: styles.flatCard, 'aria-busy': data.loading },
+        h('section', { className: 'tu-glass', style: styles.flatCard, 'aria-busy': data.loading },
           h('div', { style: styles.sectionHead },
-            h('div', { style: styles.iconChip(tints.blue) }, h(Icon, { name: 'spark', color: tokens.accent })),
+            h('div', { style: styles.iconChip(tokens.accent, tints.blue) }, h(Icon, { name: 'spark', color: '#fff' })),
             h('div', null,
               h('h1', { style: styles.sectionTitle }, t('title')),
               h('p', { style: styles.sectionSub }, t('subtitle'))),
             h('span', { style: styles.grow }),
             h('button', {
-              type: 'button', style: styles.quiet, onClick: () => { if (!data.loading) data.refresh() },
+              type: 'button', style: styles.circle, onClick: () => { if (!data.loading) data.refresh() },
               'aria-label': t('refresh'), title: t('refresh'),
-            }, h(Icon, { name: 'refresh', color: tokens.muted, size: 15 }))),
+            }, h(Icon, { name: 'refresh', color: tokens.muted, size: 16 }))),
           h('div', { style: styles.heroRow },
             h(Ring, { parts, total: totals.total, hit: totals.cacheHitRate, t }),
             h('div', { style: styles.metricGrid },
@@ -1262,9 +1336,9 @@ window.__ModuleLoader__.load({
               h(FlatMetric, { icon: 'db', color: seriesColors.cacheRead, tint: tints.blue, label: t('cardCacheRead'), value: totals.cacheRead, format: formatNumber }),
               h(FlatMetric, { icon: 'pulse', color: seriesColors.cacheWrite, tint: tints.violet, label: t('cardCalls'), value: totals.calls, format: formatNumber })))),
 
-        h('section', { style: styles.flatCard },
+        h('section', { className: 'tu-glass', style: styles.flatCard },
           h('div', { style: styles.sectionHead },
-            h('div', { style: styles.iconChip(tints.green) }, h(Icon, { name: 'pulse', color: seriesColors.out })),
+            h('div', { style: styles.iconChip(seriesColors.out, tints.green) }, h(Icon, { name: 'pulse', color: '#fff' })),
             h('h2', { style: styles.sectionTitle }, t('chartTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.pill }, data.view.granularity === 'hour' ? t('grainHour') : t('grainDay'))),
@@ -1274,9 +1348,9 @@ window.__ModuleLoader__.load({
             emptyTitle: t('chartEmpty'), emptyHint: t('chartEmptyHint'),
           })),
 
-        h('section', { style: styles.flatCard },
+        h('section', { className: 'tu-glass', style: styles.flatCard },
           h('div', { style: styles.sectionHead },
-            h('div', { style: styles.iconChip(tints.amber) }, h(Icon, { name: 'db', color: seriesColors.in })),
+            h('div', { style: styles.iconChip(seriesColors.in, tints.amber) }, h(Icon, { name: 'db', color: '#fff' })),
             h('h2', { style: styles.sectionTitle }, t('breakdownTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.sectionSub }, t('breakdownSub'))),
@@ -1287,25 +1361,25 @@ window.__ModuleLoader__.load({
               h('div', { style: styles.track }, h('div', { style: styles.trackFill(part.color, Math.round(part.value / sum * 100)) })),
               h('span', { style: styles.rankValue }, formatExact(part.value)))))),
 
-        h('section', { style: styles.flatCard },
+        h('section', { className: 'tu-glass', style: styles.flatCard },
           h('div', { style: styles.sectionHead },
-            h('div', { style: styles.iconChip(tints.violet) }, h(Icon, { name: 'spark', color: seriesColors.cacheWrite })),
+            h('div', { style: styles.iconChip(seriesColors.cacheWrite, tints.violet) }, h(Icon, { name: 'spark', color: '#fff' })),
             h('h2', { style: styles.sectionTitle }, t('modelShareTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.sectionSub }, t('modelShareSub'))),
           h(ModelShare, { models, colors: modelColors, t })),
 
-        h('section', { style: styles.flatCard },
+        h('section', { className: 'tu-glass', style: styles.flatCard },
           h('div', { style: styles.sectionHead },
-            h('div', { style: styles.iconChip(tints.blue) }, h(Icon, { name: 'db', color: seriesColors.cacheRead })),
+            h('div', { style: styles.iconChip(seriesColors.cacheRead, tints.blue) }, h(Icon, { name: 'db', color: '#fff' })),
             h('h2', { style: styles.sectionTitle }, t('modelUsageTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.sectionSub }, t('modelUsageSub'))),
           h(ModelUsage, { models, colors: modelColors, t })),
 
-        h('section', { style: styles.flatCard },
+        h('section', { className: 'tu-glass', style: styles.flatCard },
           h('div', { style: styles.sectionHead },
-            h('div', { style: styles.iconChip(tints.green) }, h(Icon, { name: 'pulse', color: seriesColors.out })),
+            h('div', { style: styles.iconChip(seriesColors.out, tints.green) }, h(Icon, { name: 'pulse', color: '#fff' })),
             h('h2', { style: styles.sectionTitle }, t('modelTrendTitle')),
             h('span', { style: styles.grow }),
             h('span', { style: styles.pill }, data.modelView.granularity === 'hour' ? t('grainHour') : t('grainDay'))),
@@ -1330,12 +1404,13 @@ window.__ModuleLoader__.load({
             onCancel: () => data.setPickerOpen(false),
             onApply: ids => { data.setSelected(ids); data.setPickerOpen(false) },
           })
-          : null)
+          : null))
     }
 
     /** Settings surface: the compact form-style layout it shipped with. */
     function SettingsPanel({ t }) {
       const data = useUsageData(t, undefined, '7d')
+      useEffect(() => { ensureStageStyles() }, [])
       const totals = data.totals
       const cards = [
         { label: t('cardTotal'), value: formatNumber(totals.total), hint: formatExact(totals.total) },
@@ -1350,7 +1425,7 @@ window.__ModuleLoader__.load({
         buckets: data.view.series.map(point => point.bucket),
         series: usageSeries(data.view.series, t),
       }), [data.view.series, t])
-      return h('div', { style: styles.page },
+      return h('div', { className: 'tu-stage tu-stage-soft', style: styles.page },
         h('div', { style: styles.header },
           h('h2', { style: styles.title }, t('title')),
           h('p', { style: styles.subtitle }, t('subtitle'))),
@@ -1368,12 +1443,12 @@ window.__ModuleLoader__.load({
         data.error !== null ? h('div', { style: styles.error, role: 'alert' }, `${t('failed')}: ${data.error}`) : null,
 
         h('div', { style: { ...styles.cards, opacity: data.loading ? 0.6 : 1 }, 'aria-busy': data.loading },
-          cards.map(card => h('div', { key: card.label, style: styles.card },
+          cards.map(card => h('div', { key: card.label, className: 'tu-glass', style: styles.card },
             h('span', { style: styles.cardLabel }, card.label),
             h('span', { style: styles.cardValue }, card.value),
             card.hint === undefined ? null : h('span', { style: styles.cardHint }, card.hint)))),
 
-        h('div', { style: styles.chartCard },
+        h('div', { className: 'tu-glass', style: styles.chartCard },
           h('div', { style: styles.chartHead },
             h('span', { style: styles.chartTitle }, t('chartTitle')),
             h('span', { style: styles.spacer }),
